@@ -1,0 +1,28 @@
+{
+    "name": "akosinov/phonebook",
+    "description": "Phonebook RESTful API",
+    "type": "project",
+    "license": "GNU",
+    "authors": [
+        {
+            "name": "Andrey A. Kosinov",
+            "email": "aka@portalmaster.ru"
+        }
+    ],
+    "require": {
+        "nikic/fast-route": "^1.3",
+        "illuminate/database": "^5.8"
+    },
+
+    "autoload": {
+	    "psr-4": {
+	    	"Core\\": "core/",
+	        "App\\": "app/"
+	    },
+	    "files": [
+	        "core/lib/error_handler.php",
+	        "core/lib/exception_handler.php",
+	        "core/lib/config.php"
+	    ]
+	}
+}

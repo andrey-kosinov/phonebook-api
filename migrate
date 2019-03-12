@@ -1,0 +1,152 @@
+<?php
+
+/**
+ * Self made simple and small database migration system, based on pure SQL
+ *
+ * @author   Andrey A. Kosinov <aka@portalmaster.ru>
+ */
+
+use Illuminate\Database\Capsule\Manager as Capsule;
+
+require_once 'vendor/autoload.php';
+
+require 'core/lib/bootEloquentORM.php';
+
+$help = <<<"EOS"
+
+ Self made migration system with migration files as plain SQL-scripts
+ \033[33mUsage: php migrate commands\033[0m
+ Commands:
+    \033[36mhelp\033[0m      This help message.          Example: \033[33mphp migrate help\033[0m
+    \033[36minit\033[0m      Initializing migrate table. Example: \033[33mphp migrate init\033[0m
+    \033[36mcreate\033[0m    Create new migration file.  Example: \033[33mphp migrate create UserTable\033[0m
+    \033[36mrollback\033[0m  Rollback last transaction.  Example: \033[33mphp migrate rollback\033[0m
+
+
+EOS;
+
+	$tables = explode("\n",trim(`mysql -u $DB_CONF[user] --password=$DB_CONF[password] -Bse "show tables from $DB_CONF[database]"`));
+
+	if ($argc>1)
+	{
+		switch ($argv[1]) {
+
+			case 'help':
+				echo $help;
+				die;
+
+				break;
+
+			case 'init':
+				if (!is_dir('_migrations'))
+					mkdir('_migrations',0775,true);
+				if (in_array('migrations',$tables)) {
+					echo PHP_EOL;
+					echo 'Migrations init already has been done. One time is enough ;)'.PHP_EOL;
+					die(PHP_EOL);
+				} else {
+					Capsule::transaction(function () {
+
+						$sql = "
+							CREATE TABLE migrations (
+								id INT(10) UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
+								file VARCHAR(255) DEFAULT NULL,
+								created_at TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+								updated_at TIMESTAMP NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
+							) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+							ALTER TABLE migrations
+								ADD KEY created_at(created_at),
+								ADD KEY updated_at(updated_at);
+						";
+
+						Capsule::unprepared($sql);
+					});
+
+					die(PHP_EOL.'Migrations init complete. Now you can migrate'.PHP_EOL.PHP_EOL);
+
+				}
+
+				break;
+
+			case 'create':
+
+				if ($argc<3) {
+					echo PHP_EOL."You missed transaction name. Usage: \033[33mphp migrate create <MigrationName>\033[0m".PHP_EOL;
+					die(PHP_EOL);
+				}
+
+				$transactionName = $argv[2];
+				$fname = date("Y_m_d_His").'_'.$transactionName.'.sql';
+				$f = fopen('_migrations/'.$fname,'w+');
+				fputs($f,"\nInstead of this text write down sql script to migrate to.\nAttention! Leave the delimiter bellow.\nDO NOT REMOVE!!!\n\n##>-<##\n\nAnd here should be sql to rollback current transaction.\n");
+				fclose($f);
+
+				echo PHP_EOL;
+				echo "Migration file \033[36m$fname\033[0m created in folder \033[36m_migrations\033[0m".PHP_EOL;
+				die(PHP_EOL);
+
+				break;
+
+			case 'rollback':
+				$migration = Capsule::table('migrations')->orderBy('id','desc')->first();
+				if ($migration) {
+					$sqlParts = explode('##>-<##',file_get_contents($migration->file));
+					Capsule::unprepared($sqlParts[1]);
+					echo PHP_EOL."\033[32m Migration rolled back: \033[0m\033[36m".$migration->file."\033[0m".PHP_EOL;
+					Capsule::table('migrations')->where('id',$migration->id)->delete();
+				} else {
+					echo PHP_EOL."Migrations system is clean. \033[36mNothing to rollback.\033[0m".PHP_EOL;
+				}
+
+				die(PHP_EOL);
+
+				break;
+		}
+	}
+
+	if (!in_array('migrations',$tables)) {
+		echo PHP_EOL;
+		echo 'No migrations table found!'.PHP_EOL;
+		echo 'You have to run "php migrate init" first'.PHP_EOL;
+		die(PHP_EOL);
+	}
+
+	echo PHP_EOL;
+
+	$out = trim(`ls _migrations/*.sql`);
+	$arr = explode("\n",$out);
+	$migrated = 0;
+	foreach ($arr as $fname) {
+		$fname = trim($fname);
+		$migration = Capsule::table('migrations')->where('file',$fname)->first();
+		if (!$migration) {
+			$migrated++;
+			echo "  ".$fname.' ... ';
+			$sqlParts = explode('##>-<##',file_get_contents($fname));
+			if (count($sqlParts) != 2) {
+				echo "\033[31m wrong file format\033[0m".PHP_EOL;
+				continue;
+			}
+
+			try {
+				Capsule::unprepared($sqlParts[0]);
+			} catch (Exception $e) {
+				echo "\n\n\e[1;37m \e[41m ERROR \033[0m";
+				echo "\n\033[37m \e[41m ".$e->getMessage()." \033[0m\n";
+				die(PHP_EOL);
+			}
+
+			echo "\033[32m done\033[0m".PHP_EOL;
+
+			$nm = ['file'=>$fname,'created_at'=>date('Y-m-d H:i:s')];
+			Capsule::table('migrations')->insert($nm);
+		}
+	}
+
+	if (!$migrated)
+		echo "\033[36m".'Nothing to migrate'."\033[0m".PHP_EOL;
+	else
+		echo PHP_EOL."  \033[36m".' Files migrated: '.$migrated."\033[0m".PHP_EOL;
+
+	echo PHP_EOL;
